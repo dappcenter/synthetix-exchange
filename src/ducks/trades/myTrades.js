@@ -1,6 +1,7 @@
-import { takeLatest, put, select } from 'redux-saga/effects';
+import { all, takeLatest, put, select } from 'redux-saga/effects';
 import { createSlice } from '@reduxjs/toolkit';
 import snxData from 'synthetix-data';
+import { SYNTHS_MAP } from 'constants/currency';
 
 import { normalizeTrades } from './utils';
 
@@ -50,6 +51,8 @@ export const getMyTrades = (state) => getMyTradesState(state).trades;
 
 const { fetchMyTradesRequest, fetchMyTradesSuccess, fetchMyTradesFailure } = myTradesSlice.actions;
 
+const MAX_TRADES = 100;
+
 function* fetchMyTrades() {
 	const currentWalletAddress = yield select(getCurrentWalletAddress);
 
@@ -57,10 +60,37 @@ function* fetchMyTrades() {
 		yield put(fetchMyTradesFailure({ error: 'you need to be connected to a wallet' }));
 	} else {
 		try {
-			const trades = yield snxData.exchanges.since({
-				fromAddress: currentWalletAddress,
-				maxBlock: Number.MAX_SAFE_INTEGER,
-				max: 100,
+			const [trades, settledTrades] = yield all([
+				snxData.exchanges.since({
+					fromAddress: currentWalletAddress,
+					maxBlock: Number.MAX_SAFE_INTEGER,
+					max: MAX_TRADES,
+				}),
+				snxData.exchanger.exchangeEntriesSettled({ from: currentWalletAddress, max: MAX_TRADES }),
+			]);
+
+			trades.forEach((trade, idx) => {
+				const settledTrade = settledTrades.find(
+					(settledTrade) =>
+						trade.timestamp === settledTrade.exchangeTimestamp &&
+						settledTrade.dest === trade.toCurrencyKey &&
+						settledTrade.src === trade.fromCurrencyKey &&
+						trade.fromAmount === settledTrade.amount
+				);
+
+				trades[idx].isSettled = false;
+
+				if (settledTrade) {
+					trades[idx].rebate = settledTrade.rebate;
+					trades[idx].reclaim = settledTrade.reclaim;
+					const totalFeeReclaim = settledTrade.rebate - settledTrade.reclaim;
+
+					trades[idx].settledPrice =
+						trade.toCurrencyKey === SYNTHS_MAP.sUSD
+							? trade.fromAmountInUSD / (trade.fromAmount + totalFeeReclaim)
+							: trade.toAmountInUSD / (trade.toAmount + totalFeeReclaim);
+					trades[idx].isSettled = true;
+				}
 			});
 
 			yield put(fetchMyTradesSuccess({ trades: normalizeTrades(trades) }));

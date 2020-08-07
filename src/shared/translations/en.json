@@ -565,6 +565,8 @@
 				"selling-col": "selling",
 				"price-col": "price",
 				"total-col": "total",
+				"fee-reclaim-col": "fee reclamation",
+				"settled-price-col": "settled price",
 				"status-col": "status",
 				"verify-col": "verify",
 				"no-results": "No exchanges associated with this wallet."
